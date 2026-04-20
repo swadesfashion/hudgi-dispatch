@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-body: 'DM Sans', sans-serif;
+  --font-display: 'Fraunces', serif;
+  --font-mono: 'DM Mono', monospace;
+  --ink:    #1a1a2e;
+  --paper:  #f5f0e8;
+  --accent: #c84b31;
+  --muted:  #8a7f72;
+  --border: #d4cdc4;
+  --success:#2d7a4f;
+  --warn:   #b45309;
+  --surface:#fffdf9;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* Subtle paper grain texture */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.font-display { font-family: var(--font-display); }
+.font-mono    { font-family: var(--font-mono); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Status badges */
+.badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 500;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+.badge-pending   { background: #fef3c7; color: #92400e; }
+.badge-scanned   { background: #d1fae5; color: #065f46; }
+.badge-exported  { background: #dbeafe; color: #1e40af; }
+.badge-new       { background: #ede9fe; color: #4c1d95; }
+
+/* Table */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  text-align: left; font-size: 11px; font-weight: 500;
+  font-family: var(--font-mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  background: var(--paper); position: sticky; top: 0; z-index: 2;
+}
+.data-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(212,205,196,0.4);
+  vertical-align: middle;
+}
+.data-table tr:hover td { background: rgba(200,75,49,0.03); }
+
+/* Inputs */
+input, select {
+  font-family: var(--font-body);
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(200,75,49,0.08);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: 6px;
+  font-size: 13px; font-weight: 500;
+  cursor: pointer; border: none;
+  transition: all 0.15s; white-space: nowrap;
+}
+.btn-primary   { background: var(--accent); color: white; }
+.btn-primary:hover { background: #b03d25; }
+.btn-ghost     { background: transparent; color: var(--ink); border: 1px solid var(--border); }
+.btn-ghost:hover { background: white; }
+.btn-success   { background: var(--success); color: white; }
+.btn-success:hover { background: #245f3e; }
+.btn:disabled  { opacity: 0.45; cursor: not-allowed; }
+
+/* Scan input — large, prominent */
+.scan-input {
+  font-family: var(--font-mono) !important;
+  font-size: 20px !important;
+  padding: 14px 18px !important;
+  border: 2px solid var(--accent) !important;
+  border-radius: 8px !important;
+  width: 100%;
+  letter-spacing: 0.05em;
+}
+.scan-input:focus {
+  box-shadow: 0 0 0 4px rgba(200,75,49,0.12) !important;
+}
+
+/* Card */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+/* Tab nav */
+.tab-nav { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+.tab-btn {
+  padding: 10px 18px; font-size: 13px; font-weight: 500;
+  border: none; background: none; cursor: pointer;
+  color: var(--muted); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; transition: all 0.15s;
+}
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-btn:hover:not(.active) { color: var(--ink); }
+
+@media print {
+  body::before { display: none; }
+}
