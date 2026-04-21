@@ -8,95 +8,108 @@ function parseShopifyCSV(text: string) {
   // Normalize line endings
   text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
-  const lines: string[] = []
-  let cur = '', inQ = false
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i], nx = text[i + 1]
-    if (inQ) {
-      if (ch === '"' && nx === '"') { cur += '"'; i++ }
-      else if (ch === '"') inQ = false
-      else cur += ch
-    } else {
-      if (ch === '"') inQ = true
-      else if (ch === '\n') { lines.push(cur); cur = '' }
-      else cur += ch
-    }
-  }
-  if (cur) lines.push(cur)
+  // Proper CSV tokenizer: handles quoted fields with embedded commas and newlines
+  function parseCSV(input: string): string[][] {
+    const rows: string[][] = []
+    let row: string[] = []
+    let field = ''
+    let inQuote = false
+    let i = 0
 
-  function splitLine(line: string): string[] {
-    const fields: string[] = []; let f = '', q = false
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i], nx = line[i + 1]
-      if (q) {
-        if (ch === '"' && nx === '"') { f += '"'; i++ }
-        else if (ch === '"') q = false
-        else f += ch
+    while (i < input.length) {
+      const ch = input[i]
+      if (inQuote) {
+        if (ch === '"' && input[i + 1] === '"') { field += '"'; i += 2 }
+        else if (ch === '"') { inQuote = false; i++ }
+        else { field += ch; i++ }
       } else {
-        if (ch === '"') q = true
-        else if (ch === ',') { fields.push(f.trim()); f = '' }
-        else f += ch
+        if (ch === '"') { inQuote = true; i++ }
+        else if (ch === ',') { row.push(field.trim()); field = ''; i++ }
+        else if (ch === '\n') {
+          row.push(field.trim()); field = ''
+          rows.push(row); row = []
+          i++
+        } else { field += ch; i++ }
       }
     }
-    fields.push(f.trim())
-    return fields
+    if (field || row.length) { row.push(field.trim()); rows.push(row) }
+    return rows
   }
 
-  if (lines.length < 2) return []
-  const header = splitLine(lines[0]).map(h => h.toLowerCase().trim())
-  const idx = (name: string) => header.indexOf(name)
+  const rows = parseCSV(text)
+  if (rows.length < 2) return []
 
-  const iName      = idx('name')
-  const iSName     = idx('shipping name')
-  const iSAddr1    = idx('shipping address1')
-  const iSAddr2    = idx('shipping address2')
-  const iSCity     = idx('shipping city')
-  const iSZip      = idx('shipping zip')
-  const iSProvince = idx('shipping province name')
-  const iSPhone    = idx('shipping phone')
-  const iProduct   = idx('lineitem name')
-  const iSubtotal  = idx('subtotal')
-  const iShipping  = idx('shipping')
-  const iTotal     = idx('total')
-  const iPayment   = idx('payment method')
-  const iCreated   = idx('created at')
-  const iSource    = idx('source')
+  const header = rows[0].map(h => h.toLowerCase().trim())
+
+  // Flexible column finder — tries multiple known Shopify column name variants
+  const find = (...names: string[]) => {
+    for (const n of names) {
+      const i = header.indexOf(n.toLowerCase().trim())
+      if (i !== -1) return i
+    }
+    return -1
+  }
+
+  const iName      = find('name')
+  const iSName     = find('shipping name', 'ship to name', 'recipient name', 'billing name')
+  const iSAddr1    = find('shipping address1', 'shipping address 1', 'ship to address1', 'billing address1')
+  const iSAddr2    = find('shipping address2', 'shipping address 2', 'ship to address2', 'billing address2')
+  const iSCity     = find('shipping city', 'ship to city', 'billing city')
+  const iSZip      = find('shipping zip', 'shipping postal code', 'ship to zip', 'billing zip')
+  const iSProvince = find('shipping province name', 'shipping province', 'ship to province name', 'ship to province', 'billing province name', 'billing province')
+  const iSPhone    = find('shipping phone', 'phone', 'billing phone', 'customer phone')
+  const iProduct   = find('lineitem name', 'line item name', 'line_item_name', 'product')
+  const iSubtotal  = find('subtotal')
+  const iShipping  = find('shipping price', 'shipping cost', 'shipping')
+  const iTotal     = find('total')
+  const iPayment   = find('payment method', 'payment gateway')
+  const iCreated   = find('created at', 'created_at')
+  const iSource    = find('source', 'channel', 'sales channel')
+
+  // Log detected columns for debugging
+  console.log('[import-csv] Header:', header.slice(0, 30))
+  console.log('[import-csv] Column indices:', {
+    iName, iSName, iSAddr1, iSCity, iSZip, iSProvince, iSPhone,
+    iProduct, iSubtotal, iShipping, iTotal, iPayment, iCreated, iSource,
+  })
 
   const seen = new Set<string>()
   const orders: any[] = []
 
-  for (let i = 1; i < lines.length; i++) {
-    const r = splitLine(lines[i])
-    if (!r || !r[iName]) continue
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i]
+    if (!r || iName < 0 || !r[iName]) continue
     const orderNo = r[iName].trim()
     if (!orderNo || seen.has(orderNo)) continue
     seen.add(orderNo)
 
-    const zip = String(r[iSZip] || '').replace(/^'/, '').trim()
-    const phone = String(r[iSPhone] || '').replace(/^\+91/, '').trim()
-    const createdRaw = r[iCreated] || ''
+    const zip = String(r[iSZip] ?? '').replace(/^'/, '').trim()
+    const phone = String(r[iSPhone] ?? '').replace(/^\+91/, '').replace(/\s/g, '').trim()
+    const createdRaw = (r[iCreated] ?? '').trim()
     let shopifyCreatedAt: string | null = null
     try {
-      shopifyCreatedAt = createdRaw
-        ? new Date(createdRaw.replace(' +0530', '+05:30').replace(' ', 'T')).toISOString()
-        : null
+      if (createdRaw) {
+        shopifyCreatedAt = new Date(
+          createdRaw.replace(' +0530', '+05:30').replace(' +0000', 'Z').replace(' ', 'T')
+        ).toISOString()
+      }
     } catch { shopifyCreatedAt = null }
 
     orders.push({
       order_no:       orderNo,
-      customer_name:  (r[iSName] || '').trim(),
+      customer_name:  (r[iSName] ?? '').trim(),
       phone,
-      address1:       (r[iSAddr1] || '').trim(),
-      address2:       (r[iSAddr2] || '').trim(),
-      city:           (r[iSCity] || '').trim(),
+      address1:       (r[iSAddr1] ?? '').trim(),
+      address2:       (r[iSAddr2] ?? '').trim(),
+      city:           (r[iSCity] ?? '').trim(),
       pincode:        zip,
-      state:          (r[iSProvince] || '').trim(),
-      product_name:   (r[iProduct] || '').trim(),
-      subtotal:       parseFloat(r[iSubtotal]) || 0,
-      shipping:       parseFloat(r[iShipping]) || 0,
-      total:          parseFloat(r[iTotal]) || 0,
-      payment_method: (r[iPayment] || '').trim(),
-      channel:        (r[iSource] || 'shopify').trim(),
+      state:          (r[iSProvince] ?? '').trim(),
+      product_name:   (r[iProduct] ?? '').trim(),
+      subtotal:       parseFloat(r[iSubtotal] ?? '') || 0,
+      shipping:       parseFloat(r[iShipping] ?? '') || 0,
+      total:          parseFloat(r[iTotal] ?? '') || 0,
+      payment_method: (r[iPayment] ?? '').trim(),
+      channel:        (r[iSource] ?? 'shopify').trim() || 'shopify',
       shopify_created_at: shopifyCreatedAt,
     })
   }
@@ -127,6 +140,7 @@ export async function POST(req: NextRequest) {
       imported: orders.length,
       skipped: orders.length - (data?.length ?? 0),
       orders: orders.map(o => o.order_no),
+      debug_columns: { iName, iSName, iSAddr1, iSCity, iSZip, iSPhone, iProduct },
     })
   } catch (e: any) {
     console.error(e)

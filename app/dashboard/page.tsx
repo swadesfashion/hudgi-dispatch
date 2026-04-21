@@ -275,7 +275,7 @@ function OrdersTab({ orders, loading, filterDate, setFilterDate, search, setSear
 
 // ── SCAN TAB ───────────────────────────────────────────────────
 function ScanTab({ orders, onSaved, filterDate }:
-  { orders: Order[], onSaved: () => void, filterDate: string }) {
+  { orders: Order[], onSaved: () => Promise<void>, filterDate: string }) {
 
   const [scanValue, setScanValue] = useState('')
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
@@ -294,10 +294,27 @@ function ScanTab({ orders, onSaved, filterDate }:
   const unscanned = orders.filter(o => !o.dispatches?.[0]?.barcode)
   const scanned   = orders.filter(o =>  o.dispatches?.[0]?.barcode)
 
-  // Auto-select first unscanned when orders change
+  // Auto-select first unscanned on initial load only
   useEffect(() => {
     if (!activeOrder && unscanned.length > 0) setActiveOrder(unscanned[0])
-  }, [orders])
+  }, [orders]) // eslint-disable-line
+
+  // When orders refresh after a save, advance activeOrder to next unscanned
+  // (the just-saved order will now have a barcode so it won't be in unscanned)
+  useEffect(() => {
+    if (activeOrder) {
+      const stillUnscanned = orders.find(o => o.id === activeOrder.id && !o.dispatches?.[0]?.barcode)
+      if (!stillUnscanned) {
+        // Active order was just scanned — move to next unscanned
+        const next = orders.find(o => !o.dispatches?.[0]?.barcode)
+        setActiveOrder(next || null)
+      } else {
+        // Refresh activeOrder data (e.g. dispatches updated)
+        const refreshed = orders.find(o => o.id === activeOrder.id)
+        if (refreshed) setActiveOrder(refreshed)
+      }
+    }
+  }, [orders]) // eslint-disable-line
 
   async function handleScan(e: React.FormEvent) {
     e.preventDefault()
@@ -321,12 +338,8 @@ function ScanTab({ orders, onSaved, filterDate }:
     if (res.ok) {
       setLastSaved(`${activeOrder.order_no} → ${scanValue.trim()}`)
       setScanValue('')
-      onSaved()
-      // Move to next unscanned
-      const idx = unscanned.findIndex(o => o.id === activeOrder.id)
-      const next = unscanned[idx + 1] || null
-      setActiveOrder(next)
-      setTimeout(() => scanRef.current?.focus(), 100)
+      await onSaved()  // await so orders refresh before useEffect fires
+      setTimeout(() => scanRef.current?.focus(), 150)
     } else {
       const d = await res.json()
       setError(d.error || 'Save failed')
@@ -571,6 +584,23 @@ function ImportTab({ onImported }: { onImported: () => void }) {
             <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '6px' }}>
               Switched to Scan tab → assign barcodes to each order.
             </div>
+            {result.debug_columns && (
+              <details style={{ marginTop: '10px' }}>
+                <summary style={{ fontSize: '11px', color: 'var(--muted)', cursor: 'pointer',
+                  fontFamily: 'var(--font-mono)' }}>Column mapping (click to verify)</summary>
+                <div style={{ marginTop: '6px', fontSize: '11px', fontFamily: 'var(--font-mono)',
+                  color: '#065f46', lineHeight: 1.8 }}>
+                  {Object.entries(result.debug_columns).map(([k, v]) => (
+                    <div key={k}>
+                      <span style={{ color: v === -1 ? '#dc2626' : '#059669' }}>
+                        {v === -1 ? '✗' : '✓'}
+                      </span>{' '}
+                      {k}: col {String(v)} {v === -1 ? '← NOT FOUND' : ''}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         )}
 
@@ -639,9 +669,19 @@ function ExportTab({ orders, filterDate }: { orders: Order[], filterDate: string
       'CODR/COD', 'VALUE FOR CoD Rs.', 'LENGTH cm', 'BREADTH cm', 'HEIGHT cm',
     ]
 
-    // Build XLSX via SheetJS
-    const XLSX = (window as any).XLSX
-    if (!XLSX) { alert('SheetJS not loaded — refresh the page'); setExporting(false); return }
+    // Build XLSX via SheetJS — wait up to 5s for it to load
+    let XLSX = (window as any).XLSX
+    if (!XLSX) {
+      await new Promise<void>((resolve, reject) => {
+        let attempts = 0
+        const interval = setInterval(() => {
+          XLSX = (window as any).XLSX
+          if (XLSX) { clearInterval(interval); resolve() }
+          else if (++attempts > 50) { clearInterval(interval); reject(new Error('SheetJS not loaded')) }
+        }, 100)
+      }).catch(err => { alert(err.message + ' — try refreshing the page'); setExporting(false); return null })
+      if (!XLSX) return
+    }
 
     const wb = XLSX.utils.book_new()
     const wsData = [header, ...rows]
